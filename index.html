@@ -204,6 +204,14 @@
       <div class="page-title">Problems</div>
       <div class="page-sub">Solve, learn, and rise through the ranks.</div>
     </div>
+    <!-- Section tabs -->
+    <div class="section-tabs" style="display:flex;gap:6px;margin-bottom:16px;">
+      <button class="btn btn-ghost active" onclick="setFilter('section','all',this)" style="font-size:12px">All Sections</button>
+      <button class="btn btn-ghost" onclick="setFilter('section','General',this)" style="font-size:12px">General</button>
+      <button class="btn btn-ghost" onclick="setFilter('section','Competition Math',this)" style="font-size:12px">🏆 Competition</button>
+      <button class="btn btn-ghost" onclick="setFilter('section','IB AA HL',this)" style="font-size:12px">📚 IB AA HL</button>
+    </div>
+
     <div class="filter-bar" id="filter-bar">
       <span class="filter-label">Topic:</span>
       <button class="btn btn-ghost active" onclick="setFilter('topic','all',this)">All</button>

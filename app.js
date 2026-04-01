@@ -75,7 +75,7 @@ const state = {
   solvedSet:    new Set(),// Set of problem_id strings the user has solved correctly
   usingFallback:false,    // true if problems came from SEED_PROBLEMS (no DB)
 
-  filters: { topic:'all', diff:'all' },
+  filters: { topic:'all', diff:'all', section:'all' },
 
   currentView:      'dashboard',
   currentProblemId: null,
@@ -562,8 +562,8 @@ function solveRate(p) {
 
 function setFilter(type, val, btn) {
   state.filters[type] = val;
-  // Deactivate all filter buttons of the same type, then activate clicked one
-  btn.closest('.filter-bar')
+  // Deactivate siblings in same group, activate clicked
+  btn.closest('.filter-bar, .section-tabs')
     .querySelectorAll(`[onclick*="setFilter('${type}'"]`)
     .forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -574,8 +574,9 @@ function renderProblemsTable() {
   const search = (document.getElementById('search-input')?.value || '').toLowerCase();
 
   const filtered = state.problems.filter(p => {
-    if (state.filters.topic !== 'all' && p.topic !== state.filters.topic) return false;
-    if (state.filters.diff  !== 'all' && p.difficulty !== state.filters.diff)  return false;
+    if (state.filters.section !== 'all' && (p.section || 'General') !== state.filters.section) return false;
+    if (state.filters.topic   !== 'all' && p.topic !== state.filters.topic) return false;
+    if (state.filters.diff    !== 'all' && p.difficulty !== state.filters.diff) return false;
     if (search && !p.title.toLowerCase().includes(search) && !p.topic.toLowerCase().includes(search)) return false;
     return true;
   });
@@ -596,7 +597,10 @@ function renderProblemsTable() {
         <div class="row-title">${p.title}</div>
         <div class="row-title-sub">${p.attempts || 0} attempts</div>
       </div>
-      <div><span class="topic-tag">${p.topic}</span></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="topic-tag">${p.topic}</span>
+        ${p.question_type === 'mcq' ? '<span style="font-size:9px;color:var(--orange);background:rgba(240,147,78,0.1);border:1px solid rgba(240,147,78,0.25);padding:1px 6px;border-radius:10px;letter-spacing:.05em">MCQ</span>' : ''}
+      </div>
       <div><span class="diff-badge diff-${(p.difficulty || '').toLowerCase()}">${p.difficulty}</span></div>
       <div class="solve-rate-wrap">
         <div class="solve-rate-bar"><div class="solve-rate-fill" style="width:${solveRate(p)}%"></div></div>
@@ -618,6 +622,47 @@ function openProblem(id) {
   state.currentProblemId = id;
   navigate('solve');
   renderSolve(id);
+}
+
+// Renders A/B/C/D/E choice buttons for MCQ problems
+function renderMCQOptions(p, alreadySolved) {
+  const opts = typeof p.options === 'string' ? JSON.parse(p.options) : p.options;
+  const letters = ['A','B','C','D','E'];
+  const correctLetter = p.answer.toUpperCase();
+
+  return `<div class="mcq-options" id="mcq-options">
+    ${letters.filter(l => opts[l]).map(l => {
+      let cls = 'mcq-option';
+      if (alreadySolved) {
+        cls += l === correctLetter ? ' mcq-correct' : ' mcq-disabled';
+      }
+      return `<button class="${cls}" id="mcq-${l}"
+        onclick="selectMCQ('${l}', '${p.id}')"
+        ${alreadySolved ? 'disabled' : ''}>
+        <span class="mcq-letter">${l}</span>
+        <span class="mcq-text">${opts[l]}</span>
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+
+// Handles clicking an MCQ option
+function selectMCQ(letter, id) {
+  // Highlight selected, deselect others
+  document.querySelectorAll('.mcq-option').forEach(btn => btn.classList.remove('mcq-selected'));
+  const btn = document.getElementById('mcq-' + letter);
+  if (btn) btn.classList.add('mcq-selected');
+  // Store selection in a hidden input for submitAnswer to read
+  let hidden = document.getElementById('answer-input');
+  if (!hidden) {
+    hidden = document.createElement('input');
+    hidden.id = 'answer-input';
+    hidden.type = 'hidden';
+    document.getElementById('mcq-options').appendChild(hidden);
+  }
+  hidden.value = letter;
+  // Auto-submit on click for MCQ
+  submitAnswer(id);
 }
 
 function renderSolve(id) {
@@ -664,6 +709,7 @@ function renderSolve(id) {
 
     <div class="answer-section">
       <div class="answer-label">Your Answer</div>
+      ${p.question_type === 'mcq' && p.options ? renderMCQOptions(p, alreadySolved) : `
       <div class="answer-input-wrap">
         <input
           class="answer-input ${alreadySolved ? 'correct' : ''}"
@@ -679,7 +725,7 @@ function renderSolve(id) {
           ${alreadySolved ? '✓ Solved' : 'Submit →'}
         </button>
         <button class="btn btn-outline" onclick="clearAnswer()">Clear</button>
-      </div>
+      </div>`}
       <div id="result-panel"></div>
     </div>
 
@@ -736,10 +782,17 @@ async function submitAnswer(id) {
     panel.className = 'result-panel correct-panel visible';
     showToast(`✓ Correct! ${eloStr} ELO`, 'success');
 
-    // Lock input
-    input.readOnly = true;
+    // Lock input (open-answer) or MCQ buttons
+    if (input) input.readOnly = true;
     const btn = document.getElementById('submit-btn');
     if (btn) { btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '✓ Solved'; }
+    // Lock all MCQ buttons and highlight correct
+    document.querySelectorAll('.mcq-option').forEach(b => {
+      b.disabled = true;
+      b.classList.remove('mcq-selected');
+    });
+    const correctBtn = document.getElementById('mcq-' + p.answer.toUpperCase());
+    if (correctBtn) correctBtn.classList.add('mcq-correct');
 
     // Persist to Supabase
     // Always update ELO — profile always exists in DB
@@ -788,6 +841,18 @@ async function submitAnswer(id) {
       </div>`;
     panel.className = 'result-panel wrong-panel visible';
     showToast('✗ Incorrect. Keep trying.', 'error');
+
+    // Re-enable MCQ buttons for another attempt (highlight wrong selection red)
+    const wrongBtn = document.getElementById('mcq-' + userAnswer.toUpperCase());
+    if (wrongBtn) {
+      wrongBtn.classList.remove('mcq-selected');
+      wrongBtn.classList.add('mcq-wrong');
+      setTimeout(() => wrongBtn.classList.remove('mcq-wrong'), 1200);
+    }
+    document.querySelectorAll('.mcq-option').forEach(b => { b.disabled = false; });
+    // Clear hidden input
+    const hi = document.getElementById('answer-input');
+    if (hi) hi.value = '';
 
     // Restart timer for the next attempt
     state.timerSeconds  = 0;
