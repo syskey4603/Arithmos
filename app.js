@@ -309,10 +309,14 @@ function withTimeout(promise, ms = 5000) {
 }
 
 async function loadProblems() {
+  const badge = document.getElementById('problem-count-badge');
+  if (badge) badge.textContent = '…';
+
   try {
+    // 20s timeout — Supabase free tier can take 15s+ to wake from sleep
     const { data, error } = await withTimeout(
       db.from('problems').select('*').order('created_at', { ascending: true }),
-      5000
+      20000
     );
 
     if (error) throw new Error(error.message);
@@ -327,9 +331,28 @@ async function loadProblems() {
       console.log('[Problems] DB empty, using seed data');
     }
   } catch (e) {
-    console.warn('[Problems] failed (' + e.message + '), using seed data');
+    console.warn('[Problems] timed out, showing seed data — retrying in 5s');
     state.problems      = SEED_PROBLEMS;
     state.usingFallback = true;
+
+    // Retry after 5s — DB will be awake by then
+    setTimeout(async () => {
+      try {
+        const { data: retryData } = await withTimeout(
+          db.from('problems').select('*').order('created_at', { ascending: true }),
+          15000
+        );
+        if (retryData && retryData.length > 0) {
+          state.problems      = retryData;
+          state.usingFallback = false;
+          document.getElementById('problem-count-badge').textContent = retryData.length;
+          if (state.currentView === 'dashboard')  renderDashboard();
+          if (state.currentView === 'problems')   renderProblemsTable();
+          console.log('[Problems] retry OK —', retryData.length, 'loaded');
+          showToast('Problems loaded from database', 'success');
+        }
+      } catch (e2) { console.warn('[Problems] retry failed:', e2.message); }
+    }, 5000);
   }
 
   document.getElementById('problem-count-badge').textContent = state.problems.length;
