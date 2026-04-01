@@ -429,12 +429,12 @@ nav { padding:20px 0; flex:1; }
 
 .problems-table { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; }
 .table-head {
-  display:grid; grid-template-columns:40px 1fr 130px 90px 90px 80px 80px;
+  display:grid; grid-template-columns:40px 1fr 120px 130px 90px 80px 60px;
   padding:12px 20px; border-bottom:1px solid var(--border); background:var(--bg-card2);
 }
 .th { font-size:9px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-muted); }
 .table-row {
-  display:grid; grid-template-columns:40px 1fr 130px 90px 90px 80px 80px;
+  display:grid; grid-template-columns:40px 1fr 120px 130px 90px 80px 60px;
   padding:14px 20px; border-bottom:1px solid var(--border);
   align-items:center; cursor:pointer; transition:background .15s;
 }

@@ -309,14 +309,10 @@ function withTimeout(promise, ms = 5000) {
 }
 
 async function loadProblems() {
-  const badge = document.getElementById('problem-count-badge');
-  if (badge) badge.textContent = '…';
-
   try {
-    // 20s timeout — Supabase free tier can take 15s+ to wake from sleep
     const { data, error } = await withTimeout(
       db.from('problems').select('*').order('created_at', { ascending: true }),
-      20000
+      5000
     );
 
     if (error) throw new Error(error.message);
@@ -331,28 +327,9 @@ async function loadProblems() {
       console.log('[Problems] DB empty, using seed data');
     }
   } catch (e) {
-    console.warn('[Problems] timed out, showing seed data — retrying in 5s');
+    console.warn('[Problems] failed (' + e.message + '), using seed data');
     state.problems      = SEED_PROBLEMS;
     state.usingFallback = true;
-
-    // Retry after 5s — DB will be awake by then
-    setTimeout(async () => {
-      try {
-        const { data: retryData } = await withTimeout(
-          db.from('problems').select('*').order('created_at', { ascending: true }),
-          15000
-        );
-        if (retryData && retryData.length > 0) {
-          state.problems      = retryData;
-          state.usingFallback = false;
-          document.getElementById('problem-count-badge').textContent = retryData.length;
-          if (state.currentView === 'dashboard')  renderDashboard();
-          if (state.currentView === 'problems')   renderProblemsTable();
-          console.log('[Problems] retry OK —', retryData.length, 'loaded');
-          showToast('Problems loaded from database', 'success');
-        }
-      } catch (e2) { console.warn('[Problems] retry failed:', e2.message); }
-    }, 5000);
   }
 
   document.getElementById('problem-count-badge').textContent = state.problems.length;
@@ -622,11 +599,11 @@ function renderProblemsTable() {
         <div class="row-title">${p.title}</div>
         <div class="row-title-sub">${p.attempts || 0} attempts</div>
       </div>
-      <div style="display:flex;align-items:center;gap:6px">
-        <span class="topic-tag">${p.topic}</span>
-        ${p.question_type === 'mcq' ? '<span style="font-size:9px;color:var(--orange);background:rgba(240,147,78,0.1);border:1px solid rgba(240,147,78,0.25);padding:1px 6px;border-radius:10px;letter-spacing:.05em">MCQ</span>' : ''}
+      <div><span class="topic-tag">${p.topic}</span></div>
+      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+        <span class="diff-badge diff-${(p.difficulty || '').toLowerCase()}">${p.difficulty}</span>
+        ${p.question_type === 'mcq' ? '<span style="font-size:9px;color:var(--orange);background:rgba(240,147,78,0.1);border:1px solid rgba(240,147,78,0.25);padding:2px 7px;border-radius:10px;letter-spacing:.05em;font-weight:600">MCQ</span>' : ''}
       </div>
-      <div><span class="diff-badge diff-${(p.difficulty || '').toLowerCase()}">${p.difficulty}</span></div>
       <div class="solve-rate-wrap">
         <div class="solve-rate-bar"><div class="solve-rate-fill" style="width:${solveRate(p)}%"></div></div>
         <div class="solve-rate-text">${solveRate(p)}%</div>
