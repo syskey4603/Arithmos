@@ -72,7 +72,9 @@ const state = {
   user:         null,     // Supabase auth user object
   profile:      null,     // Row from public.profiles
   problems:     [],       // Array of problem objects
-  solvedSet:    new Set(),// Set of problem_id strings the user has solved correctly
+  solvedSet:        new Set(),// Set of problem_id strings the user has solved correctly
+  solutionViewedSet: new Set(),// Set of problem_ids where user viewed solution (ELO blocked)
+  attemptedSet:      new Set(),// Set of problem_ids attempted at least once this session
   usingFallback:false,    // true if problems came from SEED_PROBLEMS (no DB)
 
   filters: { topic:'all', diff:'all', section:'all' },
@@ -307,15 +309,10 @@ function withTimeout(promise, ms = 5000) {
 }
 
 async function loadProblems() {
-  // Show a loading indicator while we wait
-  const badge = document.getElementById('problem-count-badge');
-  if (badge) badge.textContent = '…';
-
   try {
-    // Give Supabase up to 20s — free tier can take 15s+ to wake from sleep
     const { data, error } = await withTimeout(
       db.from('problems').select('*').order('created_at', { ascending: true }),
-      20000
+      5000
     );
 
     if (error) throw new Error(error.message);
@@ -330,33 +327,9 @@ async function loadProblems() {
       console.log('[Problems] DB empty, using seed data');
     }
   } catch (e) {
-    console.warn('[Problems] timed out (' + e.message + '), showing seed data — will retry');
+    console.warn('[Problems] failed (' + e.message + '), using seed data');
     state.problems      = SEED_PROBLEMS;
     state.usingFallback = true;
-
-    // Schedule a retry — by 20s Supabase will have woken up
-    // Retry silently in background; if it works, swap problems and re-render
-    setTimeout(async () => {
-      console.log('[Problems] retrying DB fetch...');
-      try {
-        const { data: retryData } = await withTimeout(
-          db.from('problems').select('*').order('created_at', { ascending: true }),
-          15000
-        );
-        if (retryData && retryData.length > 0) {
-          console.log('[Problems] retry succeeded —', retryData.length, 'problems loaded');
-          state.problems      = retryData;
-          state.usingFallback = false;
-          document.getElementById('problem-count-badge').textContent = retryData.length;
-          // Re-render whichever view is currently active
-          if (state.currentView === 'dashboard')   renderDashboard();
-          if (state.currentView === 'problems')    renderProblemsTable();
-          showToast('Problems loaded from database', 'success');
-        }
-      } catch (retryErr) {
-        console.warn('[Problems] retry also failed:', retryErr.message);
-      }
-    }, 5000); // wait 5s then retry (DB will usually be awake by then)
   }
 
   document.getElementById('problem-count-badge').textContent = state.problems.length;
@@ -793,10 +766,15 @@ async function submitAnswer(id) {
 
   // Calculate ELO change regardless of right/wrong (wrong still runs the formula)
   const { delta, newElo } = calcElo(state.profile.elo || 1200, p.difficulty, correct, timeTaken);
-  const eloStr = (correct && delta > 0 ? '+' : '') + delta;
+  const peekedBeforeCorrect = state.solutionViewedSet.has(String(p.id));
+  const eloStr = peekedBeforeCorrect
+    ? '+0 (solution viewed)'
+    : (correct && delta > 0 ? '+' : '') + delta;
 
   if (correct) {
     // ── CORRECT ──────────────────────────────────────────
+    // Check if user already peeked at solution — if so, no ELO awarded
+    const solutionWasPeeked = state.solutionViewedSet.has(String(p.id));
     state.solvedSet.add(p.id);
 
     panel.innerHTML = `
@@ -823,23 +801,28 @@ async function submitAnswer(id) {
     const correctBtn = document.getElementById('mcq-' + p.answer.toUpperCase());
     if (correctBtn) correctBtn.classList.add('mcq-correct');
 
-    // Persist to Supabase
-    // Always update ELO — profile always exists in DB
-    const { error: eloErr } = await db
-      .from('profiles')
-      .update({
-        elo:          newElo,
-        solved_count: (state.profile.solved_count || 0) + 1,
-        last_active:  new Date().toISOString().split('T')[0]
-      })
-      .eq('id', state.user.id);
-
-    if (eloErr) console.error('[ELO save]', eloErr.message);
-    else console.log('[ELO] updated to', newElo);
-
-    // Update local state immediately so sidebar reflects it
-    state.profile.elo         = newElo;
-    state.profile.solved_count = (state.profile.solved_count || 0) + 1;
+    // Persist to Supabase — skip ELO update if solution was peeked
+    if (!solutionWasPeeked) {
+      const { error: eloErr } = await db
+        .from('profiles')
+        .update({
+          elo:          newElo,
+          solved_count: (state.profile.solved_count || 0) + 1,
+          last_active:  new Date().toISOString().split('T')[0]
+        })
+        .eq('id', state.user.id);
+      if (eloErr) console.error('[ELO save]', eloErr.message);
+      else console.log('[ELO] updated to', newElo);
+      state.profile.elo         = newElo;
+      state.profile.solved_count = (state.profile.solved_count || 0) + 1;
+    } else {
+      // Still count as solved but don't award ELO
+      await db.from('profiles')
+        .update({ solved_count: (state.profile.solved_count || 0) + 1, last_active: new Date().toISOString().split('T')[0] })
+        .eq('id', state.user.id);
+      state.profile.solved_count = (state.profile.solved_count || 0) + 1;
+      console.log('[ELO] skipped — solution was viewed for this problem');
+    }
     updateSidebarUser();
 
     // Record submission (upsert to avoid duplicate if re-submitted)
@@ -860,6 +843,11 @@ async function submitAnswer(id) {
 
   } else {
     // ── INCORRECT ────────────────────────────────────────
+    // Track that user has attempted this problem
+    state.attemptedSet.add(p.id);
+
+    const alreadyAttempted = true; // just set it above
+
     panel.innerHTML = `
       <div class="result-header">
         <div style="font-size:20px">✗</div>
@@ -867,6 +855,13 @@ async function submitAnswer(id) {
       </div>
       <div class="result-explanation">
         Not quite. Check your working, or reveal the hint above.
+      </div>
+      <div style="margin-top:14px">
+        <button class="btn btn-ghost" style="font-size:11px;color:var(--text-muted)"
+          onclick="viewSolution('${p.id}')">
+          👁 View Solution
+          <span style="font-size:9px;color:var(--red);margin-left:4px">(blocks ELO gain)</span>
+        </button>
       </div>`;
     panel.className = 'result-panel wrong-panel visible';
     showToast('✗ Incorrect. Keep trying.', 'error');
@@ -915,6 +910,55 @@ function clearAnswer() {
   if (panel)  { panel.className = 'result-panel'; panel.innerHTML = ''; }
 }
 
+
+// Shows the full solution and marks the problem as ELO-blocked
+function viewSolution(id) {
+  const p = state.problems.find(x => String(x.id) === String(id));
+  if (!p) return;
+
+  // Mark as peeked — ELO permanently blocked for this problem this session
+  state.solutionViewedSet.add(String(id));
+
+  // Stop timer
+  clearInterval(state.timerInterval);
+  state.timerInterval = null;
+
+  // Disable all inputs
+  const input = document.getElementById('answer-input');
+  if (input) { input.readOnly = true; input.className = 'answer-input'; }
+  const submitBtn = document.getElementById('submit-btn');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.style.opacity = '.5'; }
+  document.querySelectorAll('.mcq-option').forEach(b => {
+    b.disabled = true;
+    b.classList.remove('mcq-selected', 'mcq-wrong');
+  });
+  // Highlight correct MCQ answer
+  const correctMCQ = document.getElementById('mcq-' + (p.answer || '').toUpperCase());
+  if (correctMCQ) correctMCQ.classList.add('mcq-correct');
+
+  // Replace the result panel with full solution
+  const panel = document.getElementById('result-panel');
+  if (panel) {
+    panel.innerHTML = `
+      <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <div style="font-size:16px">📖</div>
+          <div style="font-family:var(--font-display);font-size:18px;font-weight:600;color:var(--text)">Solution</div>
+          <div style="margin-left:auto;font-size:10px;color:var(--red);background:var(--red-dim);border:1px solid rgba(240,96,96,0.2);padding:2px 8px;border-radius:10px;letter-spacing:.05em">
+            ELO BLOCKED
+          </div>
+        </div>
+        <div style="font-size:13px;color:var(--text-dim);line-height:1.9;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:16px">
+          ${p.explanation || 'No solution available.'}
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
+          You can still submit the correct answer, but no ELO will be awarded since you viewed the solution.
+        </div>
+      </div>`;
+    panel.className = 'result-panel visible';
+    panel.style.border = '1px solid rgba(240,96,96,0.2)';
+  }
+}
 
 // ─────────────────────────────────────────────────────────
 //  13. UPLOAD PROBLEM (permission-gated)
