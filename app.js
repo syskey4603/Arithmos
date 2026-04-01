@@ -307,10 +307,15 @@ function withTimeout(promise, ms = 5000) {
 }
 
 async function loadProblems() {
+  // Show a loading indicator while we wait
+  const badge = document.getElementById('problem-count-badge');
+  if (badge) badge.textContent = '…';
+
   try {
+    // Give Supabase up to 20s — free tier can take 15s+ to wake from sleep
     const { data, error } = await withTimeout(
       db.from('problems').select('*').order('created_at', { ascending: true }),
-      5000
+      20000
     );
 
     if (error) throw new Error(error.message);
@@ -325,9 +330,33 @@ async function loadProblems() {
       console.log('[Problems] DB empty, using seed data');
     }
   } catch (e) {
-    console.warn('[Problems] failed (' + e.message + '), using seed data');
+    console.warn('[Problems] timed out (' + e.message + '), showing seed data — will retry');
     state.problems      = SEED_PROBLEMS;
     state.usingFallback = true;
+
+    // Schedule a retry — by 20s Supabase will have woken up
+    // Retry silently in background; if it works, swap problems and re-render
+    setTimeout(async () => {
+      console.log('[Problems] retrying DB fetch...');
+      try {
+        const { data: retryData } = await withTimeout(
+          db.from('problems').select('*').order('created_at', { ascending: true }),
+          15000
+        );
+        if (retryData && retryData.length > 0) {
+          console.log('[Problems] retry succeeded —', retryData.length, 'problems loaded');
+          state.problems      = retryData;
+          state.usingFallback = false;
+          document.getElementById('problem-count-badge').textContent = retryData.length;
+          // Re-render whichever view is currently active
+          if (state.currentView === 'dashboard')   renderDashboard();
+          if (state.currentView === 'problems')    renderProblemsTable();
+          showToast('Problems loaded from database', 'success');
+        }
+      } catch (retryErr) {
+        console.warn('[Problems] retry also failed:', retryErr.message);
+      }
+    }, 5000); // wait 5s then retry (DB will usually be awake by then)
   }
 
   document.getElementById('problem-count-badge').textContent = state.problems.length;
