@@ -298,22 +298,14 @@ async function syncProfileFromDB() {
 // Sets state.usingFallback so submission logic knows whether
 // to persist attempt counts.
 
-// Wraps any promise with a timeout — if DB hangs we fall back immediately
-function withTimeout(promise, ms = 5000) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('timeout after ' + ms + 'ms')), ms)
-    )
-  ]);
-}
+
 
 async function loadProblems() {
   try {
-    const { data, error } = await withTimeout(
-      db.from('problems').select('*').order('created_at', { ascending: true }),
-      5000
-    );
+    const { data, error } = await db
+  .from('problems')
+  .select('*')
+  .order('created_at', { ascending: true });
 
     if (error) throw new Error(error.message);
 
