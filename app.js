@@ -391,21 +391,52 @@ async function getUserRank() {
 // ─────────────────────────────────────────────────────────
 
 function calcElo(playerElo, difficulty, correct, timeTakenSecs) {
-  // Implicit ELO of the problem by difficulty tier
-  const problemElo = { Easy: 1100, Medium: 1350, Hard: 1650 }[difficulty] || 1200;
-  const K = 32;
+  // ── Problem strength by difficulty ──────────────────────
+  // Harder problems have higher implicit ELO AND higher K-factor
+  // (more ELO at stake — solving a hard problem counts for more)
+  const cfg = {
+    Easy:   { problemElo: 1050, K: 24, expectedSecs: 90  },
+    Medium: { problemElo: 1350, K: 32, expectedSecs: 180 },
+    Hard:   { problemElo: 1700, K: 44, expectedSecs: 300 },
+  }[difficulty] || { problemElo: 1200, K: 32, expectedSecs: 180 };
 
-  // Expected score (probability of winning) from player's perspective
+  const { problemElo, K, expectedSecs } = cfg;
+
+  // ── Standard ELO expected score ──────────────────────────
   const expected = 1 / (1 + Math.pow(10, (problemElo - playerElo) / 400));
   const score    = correct ? 1 : 0;
+  const baseDelta = Math.round(K * (score - expected));
 
-  // Time bonus: max +4 for solving in under 30s, scaling down to 0 at 120s+
-  const timeBonus = correct ? Math.max(0, Math.floor((120 - timeTakenSecs) / 30)) : 0;
+  // ── Time modifier (only applied on correct answers) ──────
+  //
+  // Compares actual solve time to the expected time for that difficulty.
+  // Solving faster = bonus; slower = penalty (but correct is never negative).
+  //
+  //  ratio < 0.33  → solved in <1/3 expected time  → +5 bonus
+  //  ratio < 0.5   → solved in <half expected time  → +3 bonus
+  //  ratio < 0.75  → just under expected time       → +1 bonus
+  //  ratio < 1.25  → roughly on pace                →  0
+  //  ratio < 2.0   → took up to 2x expected         → -2 penalty
+  //  ratio >= 2.0  → took over 2x expected          → -4 penalty
+  //
+  let timeMod = 0;
+  if (correct && timeTakenSecs > 0) {
+    const ratio = timeTakenSecs / expectedSecs;
+    if      (ratio < 0.33) timeMod = +5;
+    else if (ratio < 0.5)  timeMod = +3;
+    else if (ratio < 0.75) timeMod = +1;
+    else if (ratio < 1.25) timeMod =  0;
+    else if (ratio < 2.0)  timeMod = -2;
+    else                   timeMod = -4;
+  }
 
-  const delta  = Math.round(K * (score - expected)) + timeBonus;
+  // Correct answers always give at least +1 ELO (feel rewarding)
+  // Wrong answers can go negative (normal ELO behaviour)
+  let delta = baseDelta + timeMod;
+  if (correct) delta = Math.max(1, delta);
+
   const newElo = Math.max(800, playerElo + delta);
-
-  return { delta, newElo };
+  return { delta, newElo, baseDelta, timeMod };
 }
 
 
@@ -769,7 +800,10 @@ async function submitAnswer(id) {
   const peekedBeforeCorrect = state.solutionViewedSet.has(String(p.id));
   const eloStr = peekedBeforeCorrect
     ? '+0 (solution viewed)'
-    : (correct && delta > 0 ? '+' : '') + delta;
+    : (delta > 0 ? '+' : '') + delta +
+      (correct && timeMod !== 0
+        ? ` <span style="font-size:10px;opacity:.7">(base ${baseDelta > 0 ? '+' : ''}${baseDelta}, time ${timeMod > 0 ? '+' : ''}${timeMod})</span>`
+        : '');
 
   if (correct) {
     // ── CORRECT ──────────────────────────────────────────
