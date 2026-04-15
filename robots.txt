@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://arithmosmath.vercel.app/sitemap.xml
