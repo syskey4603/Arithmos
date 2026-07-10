@@ -79,9 +79,15 @@ def login_required(fn):
 def calc_elo(player_elo, difficulty, correct, time_taken):
     problem_rating = DIFF_RATINGS.get(difficulty, 1200)
     expected = 1 / (1 + 10 ** ((problem_rating - player_elo) / 400))
-    score = 1 if correct else 0
-    time_bonus = max(0, (120 - time_taken) // 30) if correct else 0
-    delta = round(32 * (score - expected)) + time_bonus
+    if correct:
+        score = 1
+        time_bonus = max(0, (120 - time_taken) // 30)
+        delta = round(32 * (score - expected)) + time_bonus
+        delta = max(10, delta)
+    else:
+        score = 0
+        delta = round(32 * (score - expected))
+        delta = min(-10, delta)
     new_elo = max(800, player_elo + delta)
     return delta, new_elo
 
@@ -313,6 +319,7 @@ def submit_answer():
 
     elif not correct and not already_solved:
         save_topic_elo(g.user["id"], topic, new_topic_elo)
+        db_update("profiles", {"elo": new_global_elo}, {"id": f"eq.{g.user['id']}"})
         try:
             db_insert("submissions", {
                 "user_id": g.user["id"],
@@ -341,7 +348,13 @@ def submit_answer():
             "time_taken": time_taken
         })
 
-    return jsonify({"correct": False, "elo_delta": topic_delta, "topic_elo": new_topic_elo})
+    elo_change = 0 if already_solved else topic_delta
+    return jsonify({
+        "correct": False,
+        "elo_delta": elo_change,
+        "new_elo": profile.get("elo", 1200) if already_solved else new_global_elo,
+        "topic_elo": topic_elo if already_solved else new_topic_elo
+    })
 
 @app.post("/api/problems/<problem_id>/solution")
 @login_required

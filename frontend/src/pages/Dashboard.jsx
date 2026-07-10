@@ -6,12 +6,12 @@ import { api, solveRate } from '../lib/api';
 import { AnimatedNumber, DiffBadge, TopicTag } from '../components/ui';
 
 const TOPIC_COLOUR = {
-  'Algebra':       '#E8B84B',
-  'Number Theory': '#2DD4A8',
-  'Combinatorics': '#8B7CF6',
-  'Geometry':      '#F0934E',
-  'Probability':   '#F06060',
-  'Sequences':     '#4DD0E1'
+  'Algebra':       '#D9852E',
+  'Number Theory': '#16A382',
+  'Combinatorics': '#7C5CFA',
+  'Geometry':      '#E8703A',
+  'Probability':   '#E5484D',
+  'Sequences':     '#2F9BB5'
 };
 
 const stagger = {

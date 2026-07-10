@@ -65,8 +65,8 @@ export function Sidebar() {
             <svg width="46" height="46" viewBox="0 0 46 46">
               <defs>
                 <linearGradient id="goldGrad" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#F5D478" />
-                  <stop offset="100%" stopColor="#C9982F" />
+                  <stop offset="0%" stopColor="#F2A93E" />
+                  <stop offset="100%" stopColor="#B9711F" />
                 </linearGradient>
               </defs>
               <circle className="elo-ring-track" cx="23" cy="23" r={R} fill="none" strokeWidth="3.5" />

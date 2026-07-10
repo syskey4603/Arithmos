@@ -80,17 +80,19 @@ export default function Solve() {
 
   async function handleTimeout() {
     try {
-      await api.submit({
+      const res = await api.submit({
         problem_id: String(problem.id),
         answer: '',
         time_taken: TIME_LIMIT,
         solution_viewed: wasSolutionViewed(problem.id),
         timed_out: true
       });
+      setProfile(p => ({ ...p, elo: res.new_elo }));
       setProblems(list => list.map(p =>
         String(p.id) === String(problem.id) ? { ...p, attempts: (p.attempts || 0) + 1 } : p
       ));
-      toast("Time's up! Recorded as incorrect.", 'error');
+      const dropStr = res.elo_delta ? ` (${res.elo_delta} ELO)` : '';
+      toast(`Time's up! Recorded as incorrect.${dropStr}`, 'error');
     } catch {
       toast("Time's up!", 'error');
     }
@@ -131,7 +133,7 @@ export default function Solve() {
         setAnswer(res.answer || userAnswer);
         if (isMCQ) setCorrectLetter((res.answer || '').toUpperCase());
 
-        confetti({ particleCount: 110, spread: 75, origin: { y: 0.7 }, colors: ['#E8B84B', '#F5D478', '#2DD4A8', '#EDEAE2'] });
+        confetti({ particleCount: 110, spread: 75, origin: { y: 0.7 }, colors: ['#D9852E', '#F2A93E', '#16A382', '#2B2013'] });
 
         setSolvedSet(prev => new Set(prev).add(String(problem.id)));
         if (!res.already_solved) {
@@ -147,7 +149,9 @@ export default function Solve() {
       } else {
         setResult(res);
         setInputState('wrong');
-        toast('✗ Incorrect. Check your working and try again.', 'error');
+        setProfile(p => ({ ...p, elo: res.new_elo }));
+        const dropStr = res.elo_delta ? ` ${res.elo_delta} ELO` : '';
+        toast(`✗ Incorrect.${dropStr}`, 'error');
         if (isMCQ) {
           setWrongLetter(userAnswer.toUpperCase());
           setTimeout(() => setWrongLetter(null), 1200);
@@ -182,6 +186,8 @@ export default function Solve() {
 
   const eloStr = result?.correct
     ? result.elo_blocked ? '+0 ELO (solution viewed)' : result.already_solved ? 'already solved' : `${result.elo_delta > 0 ? '+' : ''}${result.elo_delta} ELO`
+    : result && !result.correct
+    ? `${result.elo_delta || 0} ELO`
     : '';
 
   const timerColour = timedOut ? 'var(--red)' : seconds <= 60 ? 'var(--red)' : seconds <= 120 ? 'var(--orange)' : 'var(--text-dim)';
@@ -207,14 +213,12 @@ export default function Solve() {
         </div>
       </div>
 
-      {}
       {!alreadySolved && !timedOut && (
-        <div style={{ height: 2, borderRadius: 2, background: 'rgba(255,255,255,0.06)', marginBottom: 18, overflow: 'hidden' }}>
+        <div className="timer-track">
           <motion.div
+            className="timer-fill"
             style={{
-              height: '100%',
-              background: seconds > 120 ? 'linear-gradient(90deg, var(--teal), #6fe6c5)' : seconds > 60 ? 'linear-gradient(90deg, var(--orange), var(--gold))' : 'linear-gradient(90deg, var(--red), #f09090)',
-              borderRadius: 2
+              background: seconds > 120 ? 'linear-gradient(90deg, var(--teal), #4fc9a8)' : seconds > 60 ? 'linear-gradient(90deg, var(--orange), var(--gold))' : 'linear-gradient(90deg, var(--red), #ef8080)'
             }}
             animate={{ width: `${(seconds / TIME_LIMIT) * 100}%` }}
             transition={{ duration: 1, ease: 'linear' }}
@@ -237,7 +241,8 @@ export default function Solve() {
                   initial={{ opacity: 0, height: 0, marginTop: 0 }}
                   animate={{ opacity: 1, height: 'auto', marginTop: 11 }}
                   exit={{ opacity: 0, height: 0, marginTop: 0 }}>
-                  💡 {problem.hint}
+                  <span className="hint-icon">💡</span>
+                  <span>{problem.hint}</span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -285,11 +290,11 @@ export default function Solve() {
           {timedOut && !result?.correct && (
             <motion.div className="result-panel result-wrong" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <div className="result-head">
-                <div style={{ fontSize: 20 }}>⏱</div>
+                <div className="result-icon">⏱</div>
                 <div className="result-title bad">Time's Up</div>
               </div>
-              <div className="result-body">You ran out of time. This attempt has been recorded as incorrect.</div>
-              <button className="btn btn-ghost" style={{ marginTop: 13, fontSize: 11.5 }} onClick={viewSolution}>👁 View Solution</button>
+              <div className="result-body">You ran out of time. This attempt has been recorded as incorrect and your ELO has been adjusted.</div>
+              <button className="btn btn-ghost" style={{ marginTop: 14 }} onClick={viewSolution}>👁 View Solution</button>
             </motion.div>
           )}
 
@@ -298,12 +303,15 @@ export default function Solve() {
               initial={{ opacity: 0, y: 14, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ type: 'spring', stiffness: 320, damping: 24 }}>
               <div className="result-head">
-                <div style={{ fontSize: 22, color: 'var(--teal)' }}>✓</div>
-                <div className="result-title ok">Correct! <span className="elo-delta" style={{ color: 'var(--gold-bright)' }}>{eloStr}</span></div>
+                <div className="result-icon">✓</div>
+                <div className="result-title ok">Correct! <span className="elo-delta elo-up">{eloStr}</span></div>
               </div>
               <div className="result-body">
-                Solved in {formatTime(result.time_taken || 0)}.<br /><br />
-                <strong style={{ color: 'var(--text)' }}>Solution:</strong> {result.explanation}
+                Solved in {formatTime(result.time_taken || 0)}.
+              </div>
+              <div className="solution-block">
+                <div className="solution-label">Solution</div>
+                <div className="solution-text">{result.explanation}</div>
               </div>
             </motion.div>
           )}
@@ -311,12 +319,12 @@ export default function Solve() {
           {result && !result.correct && !solution && !timedOut && (
             <motion.div className="result-panel result-wrong" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <div className="result-head">
-                <div style={{ fontSize: 20, color: 'var(--red)' }}>✗</div>
-                <div className="result-title bad">Incorrect — Try Again</div>
+                <div className="result-icon">✗</div>
+                <div className="result-title bad">Incorrect <span className="elo-delta elo-down">{eloStr}</span></div>
               </div>
               <div className="result-body">Not quite. Check your working or reveal the hint above.</div>
-              <button className="btn btn-ghost" style={{ marginTop: 13, fontSize: 11.5 }} onClick={viewSolution}>
-                👁 View Solution <span style={{ fontSize: 9.5, color: 'var(--red)' }}>(blocks ELO gain)</span>
+              <button className="btn btn-ghost" style={{ marginTop: 14 }} onClick={viewSolution}>
+                👁 View Solution <span className="elo-block-note">(blocks ELO gain)</span>
               </button>
             </motion.div>
           )}
@@ -324,11 +332,13 @@ export default function Solve() {
           {solution && (
             <motion.div className="result-panel result-solution" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
               <div className="result-head">
-                <div style={{ fontSize: 17 }}>📖</div>
+                <div className="result-icon">📖</div>
                 <div className="result-title">Solution</div>
                 <span className="elo-blocked-tag">ELO BLOCKED</span>
               </div>
-              <div className="result-body">{solution.explanation || 'No solution available.'}</div>
+              <div className="solution-block">
+                <div className="solution-text">{solution.explanation || 'No solution available.'}</div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -337,10 +347,13 @@ export default function Solve() {
       {alreadySolved && !result && (
         <motion.div className="result-panel result-correct" style={{ marginTop: 18 }} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           <div className="result-head">
-            <div style={{ fontSize: 20, color: 'var(--teal)' }}>✓</div>
+            <div className="result-icon">✓</div>
             <div className="result-title ok">Already Solved</div>
           </div>
-          <div className="result-body">{problem.explanation}</div>
+          <div className="solution-block">
+            <div className="solution-label">Solution</div>
+            <div className="solution-text">{problem.explanation}</div>
+          </div>
         </motion.div>
       )}
 
