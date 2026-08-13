@@ -1,89 +1,69 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { useApp, ALL_TOPICS } from '../state/AppContext';
-import { api, solveRate } from '../lib/api';
-import { AnimatedNumber, DiffBadge, TopicTag } from '../components/ui';
-
-const TOPIC_COLOUR = {
-  'Algebra':       '#D9852E',
-  'Number Theory': '#16A382',
-  'Combinatorics': '#7C5CFA',
-  'Geometry':      '#E8703A',
-  'Probability':   '#E5484D',
-  'Sequences':     '#2F9BB5'
-};
-
-const stagger = {
-  hidden: { opacity: 0, y: 16 },
-  show: i => ({ opacity: 1, y: 0, transition: { delay: i * 0.07, duration: 0.5, ease: [0.22, 1, 0.36, 1] } })
-};
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useApp, ALL_TOPICS } from '../state/AppContext'
+import { api, solveRate } from '../lib/api'
+import { DiffBadge, TopicTag } from '../components/ui'
 
 export default function Dashboard() {
-  const { profile, problems, topicElos } = useApp();
-  const navigate = useNavigate();
-  const [accuracy,  setAccuracy]  = useState(null);
-  const [rank,      setRank]      = useState(null);
-  const [adaptive,  setAdaptive]  = useState({ loading: false });
+  const { profile, problems, topicElos } = useApp()
+  const navigate = useNavigate()
+  const [accuracy, setAccuracy] = useState(null)
+  const [rank, setRank] = useState(null)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     api.mySubmissions().then(subs => {
-      if (subs.length) setAccuracy(Math.round((subs.filter(s => s.correct).length / subs.length) * 100));
-    }).catch(() => {});
-    api.rank().then(r => setRank(r.rank)).catch(() => {});
-  }, [profile?.elo]);
+      if (subs.length > 0) {
+        const correct = subs.filter(s => s.correct).length
+        setAccuracy(Math.round(correct / subs.length * 100))
+      }
+    }).catch(() => {})
+    api.rank().then(r => setRank(r.rank)).catch(() => {})
+  }, [profile ? profile.elo : null])
 
-  function getDaily() {
-    if (!problems.length) return null;
-    const dayIndex = Math.floor(Date.now() / 86400000);
-    return problems[dayIndex % problems.length];
+  let daily = null
+  if (problems.length > 0) {
+    const dayIndex = Math.floor(Date.now() / 86400000)
+    daily = problems[dayIndex % problems.length]
   }
-  const daily = getDaily();
 
-  function getFocusAreas() {
-    if (!Object.keys(topicElos).length) return [];
-    return ALL_TOPICS
-      .map(t => ({ topic: t, elo: topicElos[t] ?? 1200 }))
-      .sort((a, b) => a.elo - b.elo)
-      .slice(0, 2);
+  let focus = []
+  if (Object.keys(topicElos).length > 0) {
+    focus = ALL_TOPICS.map(t => ({ topic: t, elo: topicElos[t] || 1200 }))
+    focus.sort((a, b) => a.elo - b.elo)
+    focus = focus.slice(0, 2)
   }
-  const focus = getFocusAreas();
-  const recent = [...problems].slice(-3).reverse();
 
-  const stats = [
-    { label: 'Problems solved', value: profile?.solved_count || 0,  accent: 'var(--teal)',        foot: 'all time' },
-    { label: 'ELO rating',      value: profile?.elo || 1200,         accent: 'var(--gold-bright)', foot: 'global ranking' },
-    { label: 'Accuracy',        value: accuracy,                      accent: 'var(--violet)',      foot: 'recent submissions', suffix: '%' },
-    { label: 'Global rank',     value: rank,                          accent: 'var(--text)',        foot: 'by ELO', prefix: '#' }
-  ];
+  const recent = problems.slice(-3).reverse()
 
-  async function goAdaptive(topic) {
-    setAdaptive({ loading: true });
+  async function practiceTopic(topic) {
+    setBusy(true)
     try {
-      const p = await api.adaptive(topic);
-      navigate(`/solve/${p.id}`);
-    } catch {
-      setAdaptive({ loading: false });
+      const p = await api.adaptive(topic)
+      navigate('/solve/' + p.id)
+    } catch (e) {
+      setBusy(false)
     }
   }
 
+  const stats = [
+    { label: 'Problems solved', value: profile ? profile.solved_count : 0 },
+    { label: 'ELO rating', value: profile ? profile.elo : 1200 },
+    { label: 'Accuracy', value: accuracy == null ? '-' : accuracy + '%' },
+    { label: 'Global rank', value: rank == null ? '-' : '#' + rank }
+  ]
+
   return (
     <div>
-      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }}>
-        <h1 className="page-title">Welcome back, <em>{profile?.username || 'Mathematician'}</em></h1>
-        <p className="page-sub">Rating {profile?.elo || 1200} ELO · {profile?.solved_count || 0} problems solved</p>
-      </motion.div>
+      <h1 className="page-title">Welcome back, {profile ? profile.username : 'Mathematician'}</h1>
+      <p className="page-sub">Rating {profile ? profile.elo : 1200} ELO, {profile ? profile.solved_count : 0} problems solved</p>
 
       <div className="stat-grid">
-        {stats.map((s, i) => (
-          <motion.div key={s.label} className="card stat-card" style={{ '--accent': s.accent }}
-            custom={i} variants={stagger} initial="hidden" animate="show">
+        {stats.map(s => (
+          <div key={s.label} className="card stat-box">
             <div className="stat-label">{s.label}</div>
-            <div className="stat-value">
-              {s.value == null ? '—' : <>{s.prefix}<AnimatedNumber value={s.value} />{s.suffix}</>}
-            </div>
-            <div className="stat-foot">{s.foot}</div>
-          </motion.div>
+            <div className="stat-value">{s.value}</div>
+          </div>
         ))}
       </div>
 
@@ -91,66 +71,41 @@ export default function Dashboard() {
         <div className="section-title">Daily Challenge</div>
       </div>
       {daily && (
-        <motion.div className="daily" onClick={() => navigate(`/solve/${daily.id}`)}
-          initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25, duration: 0.6 }} whileHover={{ scale: 1.008 }}>
-          <div className="daily-inner">
-            <div className="daily-label"><span className="daily-dot" /> Daily Challenge</div>
-            <div className="daily-title">{daily.title}</div>
-            <div className="daily-body">{daily.body}</div>
-            <div className="daily-row">
-              <button className="btn btn-gold" onClick={e => { e.stopPropagation(); navigate(`/solve/${daily.id}`); }}>
-                Solve Now →
-              </button>
-              <DiffBadge d={daily.difficulty} />
-              <TopicTag t={daily.topic} />
-              <span className="daily-rate">{solveRate(daily)}% solve rate</span>
-            </div>
+        <div className="daily-box" onClick={() => navigate('/solve/' + daily.id)}>
+          <div className="daily-title">{daily.title}</div>
+          <div className="daily-body">{daily.body}</div>
+          <div className="daily-row">
+            <button className="btn btn-primary" onClick={e => { e.stopPropagation(); navigate('/solve/' + daily.id) }}>Solve Now</button>
+            <DiffBadge d={daily.difficulty} />
+            <TopicTag t={daily.topic} />
+            <span className="daily-rate">{solveRate(daily)}% solve rate</span>
           </div>
-        </motion.div>
+        </div>
       )}
 
-      {}
       {focus.length > 0 && (
         <>
           <div className="section-head">
             <div className="section-title">Focus Areas</div>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>your two lowest-rated topics</span>
+            <span style={{ fontSize: 12, color: '#888' }}>your two lowest-rated topics</span>
           </div>
           <div className="problem-cards" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-            {focus.map((f, i) => {
-              const colour = TOPIC_COLOUR[f.topic] || 'var(--gold)';
-              const pct = Math.min(100, Math.max(0, ((f.elo - 800) / 1600) * 100));
+            {focus.map(f => {
+              const pct = Math.min(100, Math.max(0, (f.elo - 800) / 1600 * 100))
               return (
-                <motion.div key={f.topic} className="card problem-card"
-                  custom={i} variants={stagger} initial="hidden" animate="show"
-                  style={{ cursor: 'default' }}>
-                  <div className="problem-card-top">
-                    <div className="problem-card-title">{f.topic}</div>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: colour }}>
-                      {f.elo} ELO
-                    </span>
+                <div key={f.topic} className="card">
+                  <div className="problem-box-top">
+                    <div className="problem-box-title">{f.topic}</div>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{f.elo} ELO</span>
                   </div>
-                  <div className="rate-wrap" style={{ marginBottom: 12 }}>
-                    <div className="rate-bar">
-                      <div className="rate-fill" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${colour}88, ${colour})` }} />
-                    </div>
-                    <span className="rate-text" style={{ color: colour }}>{pct.toFixed(0)}%</span>
+                  <div className="rate-wrap" style={{ marginBottom: 10 }}>
+                    <div className="rate-bar"><div className="rate-fill" style={{ width: pct + '%' }}></div></div>
                   </div>
-                  {}
-                  <button
-                    className="btn btn-outline"
-                    style={{ width: '100%', fontSize: 12, borderColor: `${colour}55`, color: colour }}
-                    disabled={adaptive.loading}
-                    onClick={() => goAdaptive(f.topic)}
-                  >
-                    {adaptive.loading ? 'Finding problem…' : `Adaptive Practice — ${f.topic} →`}
+                  <button className="btn btn-outline" style={{ width: '100%' }} disabled={busy} onClick={() => practiceTopic(f.topic)}>
+                    {busy ? 'Finding problem...' : 'Practice this topic'}
                   </button>
-                  <div className="problem-card-meta" style={{ marginTop: 9 }}>
-                    Picks a problem within ±200 ELO of your rating
-                  </div>
-                </motion.div>
-              );
+                </div>
+              )
             })}
           </div>
         </>
@@ -158,25 +113,23 @@ export default function Dashboard() {
 
       <div className="section-head">
         <div className="section-title">Recent Problems</div>
-        <button className="section-link" onClick={() => navigate('/problems')}>All problems →</button>
+        <button className="section-link" onClick={() => navigate('/problems')}>All problems</button>
       </div>
       <div className="problem-cards">
-        {recent.map((p, i) => (
-          <motion.div key={p.id} className="card problem-card"
-            custom={i} variants={stagger} initial="hidden" animate="show"
-            onClick={() => navigate(`/solve/${p.id}`)}>
-            <div className="problem-card-top">
-              <div className="problem-card-title">{p.title}</div>
+        {recent.map(p => (
+          <div key={p.id} className="card problem-box" onClick={() => navigate('/solve/' + p.id)}>
+            <div className="problem-box-top">
+              <div className="problem-box-title">{p.title}</div>
               <DiffBadge d={p.difficulty} />
             </div>
-            <div className="problem-card-meta">
+            <div className="problem-box-meta">
               <TopicTag t={p.topic} />
               <span>{solveRate(p)}% solved</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--gold)' }}>{p.points} pts</span>
+              <span className="tag tag-pts">{p.points} pts</span>
             </div>
-          </motion.div>
+          </div>
         ))}
       </div>
     </div>
-  );
+  )
 }

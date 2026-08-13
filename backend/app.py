@@ -134,17 +134,17 @@ def health():
 @login_required
 def get_problems():
     all_problems = db_select("problems", {"select": "*", "order": "created_at.asc"})
-    solved_rows = db_select("submissions", {
-        "select": "problem_id",
-        "user_id": f"eq.{g.user['id']}",
-        "correct": "eq.true"
+    sub_rows = db_select("submissions", {
+        "select": "problem_id,correct",
+        "user_id": f"eq.{g.user['id']}"
     })
-    solved_ids = set(str(s["problem_id"]) for s in solved_rows)
+    solved_ids = set(str(s["problem_id"]) for s in sub_rows if s.get("correct"))
+    attempted_ids = set(str(s["problem_id"]) for s in sub_rows)
 
     result = []
     for p in all_problems:
         p_copy = dict(p)
-        if str(p_copy.get("id")) not in solved_ids:
+        if str(p_copy.get("id")) not in attempted_ids:
             p_copy.pop("answer", None)
             p_copy.pop("explanation", None)
         result.append(p_copy)
