@@ -5,12 +5,12 @@ import { api, formatTime } from '../lib/api'
 import { DiffBadge, TopicTag } from '../components/ui'
 
 const MCQ_LETTERS = ['A', 'B', 'C', 'D', 'E']
-const TIME_LIMIT = 300
+const TIME_LIMIT = 300 // 5 minutes, SC4
 
 export default function Solve() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { problems, setProblems, profile, setProfile, solvedSet, setSolvedSet, toast, markSolutionViewed, wasSolutionViewed } = useApp()
+  const { problems, setProblems, profile, setProfile, solvedSet, setSolvedSet, toast } = useApp()
 
   const problem = problems.find(p => String(p.id) === String(id))
   const alreadySolved = solvedSet.has(String(id))
@@ -20,7 +20,6 @@ export default function Solve() {
   const [answer, setAnswer] = useState(alreadySolved ? (problem ? problem.answer : '') : '')
   const [inputState, setInputState] = useState(alreadySolved ? 'correct' : '')
   const [result, setResult] = useState(null)
-  const [solution, setSolution] = useState(null)
   const [hintOpen, setHintOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [timedOut, setTimedOut] = useState(false)
@@ -29,6 +28,9 @@ export default function Solve() {
 
   const timerRef = useRef(null)
 
+  // counts down every second while the problem is open. this is a single
+  // continuous countdown for the whole problem, it does not reset just
+  // because a wrong answer was submitted, only stops on correct or timeout
   useEffect(() => {
     if (!running) return
     timerRef.current = setInterval(() => {
@@ -51,6 +53,7 @@ export default function Solve() {
     }
   }, [seconds])
 
+  // resets everything when they navigate to a different problem
   useEffect(() => {
     const solved = solvedSet.has(String(id))
     clearInterval(timerRef.current)
@@ -59,7 +62,6 @@ export default function Solve() {
     setAnswer(solved && problem ? problem.answer : '')
     setInputState(solved ? 'correct' : '')
     setResult(null)
-    setSolution(null)
     setHintOpen(false)
     setTimedOut(false)
     setCorrectLetter(solved && problem ? problem.answer.toUpperCase() : null)
@@ -76,7 +78,7 @@ export default function Solve() {
 
   const isMCQ = problem.question_type === 'mcq' && problem.options
   const options = isMCQ ? (typeof problem.options === 'string' ? JSON.parse(problem.options) : problem.options) : null
-  const locked = alreadySolved || (result && result.correct) || !!solution || timedOut
+  const locked = alreadySolved || (result && result.correct) || timedOut
 
   async function handleTimeout() {
     try {
@@ -84,47 +86,42 @@ export default function Solve() {
         problem_id: String(problem.id),
         answer: '',
         time_taken: TIME_LIMIT,
-        solution_viewed: wasSolutionViewed(problem.id),
         timed_out: true
       })
       setProfile(p => ({ ...p, elo: res.new_elo }))
       setProblems(list => list.map(p => String(p.id) === String(problem.id) ? { ...p, attempts: (p.attempts || 0) + 1 } : p))
-      toast('Time is up. Recorded as incorrect' + (res.elo_delta ? ' (' + res.elo_delta + ' ELO)' : ''), 'error')
+      toast("Time's up! Recorded as incorrect.", 'error')
     } catch (e) {
-      toast('Time is up.', 'error')
+      toast("Time's up!", 'error')
     }
   }
 
   async function submit(givenAnswer) {
     const userAnswer = (givenAnswer !== undefined ? givenAnswer : answer).trim()
 
+    // SC8, check before even hitting the server
     if (!userAnswer) {
       toast('Enter an answer before submitting.', 'error')
-      setInputState('wrong')
-      setTimeout(() => setInputState(''), 500)
       return
     }
     if (/[<>{}|\\]/.test(userAnswer)) {
       toast('Answer contains invalid characters.', 'error')
-      setInputState('wrong')
-      setTimeout(() => setInputState(''), 500)
       return
     }
 
     if (busy || locked) return
     setBusy(true)
-    setRunning(false)
     const timeTaken = TIME_LIMIT - seconds
 
     try {
       const res = await api.submit({
         problem_id: String(problem.id),
         answer: userAnswer,
-        time_taken: timeTaken,
-        solution_viewed: wasSolutionViewed(problem.id)
+        time_taken: timeTaken
       })
 
       if (res.correct) {
+        setRunning(false)
         setResult({ ...res, time_taken: timeTaken })
         setInputState('correct')
         setAnswer(res.answer || userAnswer)
@@ -139,47 +136,26 @@ export default function Solve() {
               : p
           ))
         }
-        let eloStr = res.elo_blocked ? '+0 (solution viewed)' : res.already_solved ? 'already solved' : (res.elo_delta > 0 ? '+' : '') + res.elo_delta + ' ELO'
-        toast('Correct. ' + eloStr, 'success')
+        toast('Correct. ' + (res.elo_delta > 0 ? '+' : '') + res.elo_delta + ' ELO', 'success')
       } else {
+        // wrong answer, timer just keeps running, they can try again
+        // until either they get it right or time runs out
         setResult(res)
         setInputState('wrong')
         setProfile(p => ({ ...p, elo: res.new_elo }))
-        toast('Incorrect. ' + (res.elo_delta || 0) + ' ELO', 'error')
+        toast('Incorrect. ' + res.elo_delta + ' ELO', 'error')
         if (isMCQ) {
           setWrongLetter(userAnswer.toUpperCase())
           setTimeout(() => setWrongLetter(null), 1000)
           setAnswer('')
         }
         setProblems(list => list.map(p => String(p.id) === String(problem.id) ? { ...p, attempts: (p.attempts || 0) + 1 } : p))
-        setSeconds(TIME_LIMIT)
-        setRunning(true)
         setInputState('')
       }
     } catch (e) {
       toast(e.message, 'error')
-      setRunning(true)
     }
     setBusy(false)
-  }
-
-  async function viewSolution() {
-    try {
-      const sol = await api.viewSolution(problem.id)
-      markSolutionViewed(problem.id)
-      setSolution(sol)
-      setRunning(false)
-      if (isMCQ) setCorrectLetter((sol.answer || '').toUpperCase())
-    } catch (e) {
-      toast(e.message, 'error')
-    }
-  }
-
-  let eloStr = ''
-  if (result && result.correct) {
-    eloStr = result.elo_blocked ? '+0 ELO (solution viewed)' : result.already_solved ? 'already solved' : (result.elo_delta > 0 ? '+' : '') + result.elo_delta + ' ELO'
-  } else if (result && !result.correct) {
-    eloStr = (result.elo_delta || 0) + ' ELO'
   }
 
   const timerColour = timedOut || seconds <= 60 ? '#c62828' : seconds <= 120 ? '#a0651e' : '#666'
@@ -195,17 +171,11 @@ export default function Solve() {
             <DiffBadge d={problem.difficulty} />
             <span className="tag tag-pts">{problem.points} pts</span>
             <span className="timer-box" style={{ color: timerColour }}>
-              {timedOut ? 'Time is up' : alreadySolved ? 'Solved' : formatTime(seconds)}
+              {timedOut ? "Time's up" : alreadySolved ? 'Solved' : formatTime(seconds)}
             </span>
           </div>
         </div>
       </div>
-
-      {!alreadySolved && !timedOut && (
-        <div className="timer-track">
-          <div className="timer-fill" style={{ width: (seconds / TIME_LIMIT * 100) + '%', background: seconds > 120 ? '#2e7d32' : seconds > 60 ? '#a0651e' : '#c62828' }}></div>
-        </div>
-      )}
 
       <div className="card statement">
         <div className="statement-label">Problem</div>
@@ -246,23 +216,21 @@ export default function Solve() {
               onKeyDown={e => { if (e.key === 'Enter' && !locked) submit() }}
             />
             <button className="btn btn-primary" disabled={locked || busy} onClick={() => submit()}>
-              {locked && (alreadySolved || (result && result.correct)) ? 'Solved' : busy ? 'Checking...' : 'Submit'}
+              {locked ? 'Solved' : busy ? 'Checking...' : 'Submit'}
             </button>
-            <button className="btn btn-outline" onClick={() => { if (!locked) { setAnswer(''); setInputState(''); setResult(null) } }}>Clear</button>
           </div>
         )}
 
-        {timedOut && !(result && result.correct) && (
+        {timedOut && (
           <div className="result-box wrong">
             <div className="result-title bad">Time's Up</div>
             <div className="result-body">You ran out of time. This attempt was recorded as incorrect and your ELO was adjusted.</div>
-            <button className="btn btn-plain" style={{ marginTop: 10 }} onClick={viewSolution}>View Solution</button>
           </div>
         )}
 
         {result && result.correct && (
           <div className="result-box correct">
-            <div className="result-title ok">Correct <span className="elo-tag up">{eloStr}</span></div>
+            <div className="result-title ok">Correct <span className="elo-tag up">+{result.elo_delta} ELO</span></div>
             <div className="result-body">Solved in {formatTime(result.time_taken || 0)}.</div>
             <div className="solution-block">
               <div className="solution-label">Solution</div>
@@ -271,20 +239,10 @@ export default function Solve() {
           </div>
         )}
 
-        {result && !result.correct && !solution && !timedOut && (
+        {result && !result.correct && !timedOut && (
           <div className="result-box wrong">
-            <div className="result-title bad">Incorrect <span className="elo-tag down">{eloStr}</span></div>
-            <div className="result-body">Not quite. Check your working or reveal the hint above.</div>
-            <button className="btn btn-plain" style={{ marginTop: 10 }} onClick={viewSolution}>View Solution (blocks ELO gain)</button>
-          </div>
-        )}
-
-        {solution && (
-          <div className="result-box info">
-            <div className="result-title">Solution (ELO blocked)</div>
-            <div className="solution-block">
-              <div className="solution-text">{solution.explanation || 'No solution available.'}</div>
-            </div>
+            <div className="result-title bad">Incorrect <span className="elo-tag down">{result.elo_delta} ELO</span></div>
+            <div className="result-body">Not quite. Check your working or reveal the hint above, you can still try again before time runs out.</div>
           </div>
         )}
       </div>

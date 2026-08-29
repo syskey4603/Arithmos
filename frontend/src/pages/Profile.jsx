@@ -17,6 +17,7 @@ export default function Profile() {
   const [username, setUsername] = useState(profile ? profile.username : '')
   const [rank, setRank] = useState(null)
   const [subs, setSubs] = useState(null)
+  const [openRow, setOpenRow] = useState(null) // which submission row is expanded, SC7
 
   useEffect(() => { setUsername(profile ? profile.username : '') }, [profile ? profile.username : null])
 
@@ -39,10 +40,14 @@ export default function Profile() {
     }
   }
 
+  // SC6c, last 20 attempts for the time chart plus the actual average
   const timeData = subs ? [...subs].slice(0, 20).reverse().map((s, i) => ({ n: i + 1, secs: s.time_taken || 0, correct: s.correct })) : []
   const avgTime = timeData.length > 0 ? Math.round(timeData.reduce((a, b) => a + b.secs, 0) / timeData.length) : null
+  // SC6b, accuracy across every submission the student has ever made, not a slice
   const accuracy = subs && subs.length > 0 ? Math.round(subs.filter(s => s.correct).length / subs.length * 100) : null
 
+  // SC6a, builds the elo history line chart, one line per topic, lines up
+  // attempts by index since topics dont all have the same number of attempts
   let topicChartData = []
   let topicList = []
   if (subs) {
@@ -118,10 +123,11 @@ export default function Profile() {
         </div>
       </div>
 
+      {/* SC6a, per topic elo history as a line graph, whole history not just recent */}
       {topicChartData.length > 1 && (
         <div className="card chart-card" style={{ marginTop: 18 }}>
           <div className="chart-title">ELO History by Topic</div>
-          <div className="chart-sub">per-topic ELO over your attempts</div>
+          <div className="chart-sub">per-topic ELO across every attempt since your first login</div>
           <ResponsiveContainer width="100%" height={230}>
             <LineChart data={topicChartData} margin={{ top: 6, right: 16, left: -14, bottom: 0 }}>
               <CartesianGrid stroke="#e6dcc0" vertical={false} />
@@ -137,6 +143,7 @@ export default function Profile() {
         </div>
       )}
 
+      {/* SC6c, average time per problem over the last 20 attempts */}
       {timeData.length > 1 && (
         <div className="card chart-card" style={{ marginTop: 18 }}>
           <div className="chart-title">Time per problem</div>
@@ -155,6 +162,8 @@ export default function Profile() {
         </div>
       )}
 
+      {/* SC7, review any past attempt. click a row to see the original problem
+          text alongside the submitted answer, the correct answer and the outcome */}
       <div className="section-head">
         <div className="section-title">Submission History</div>
       </div>
@@ -168,30 +177,42 @@ export default function Profile() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 140px 70px', gap: 12, padding: '10px 16px', borderBottom: '1px solid #ddd0ac', fontSize: 11, textTransform: 'uppercase', color: '#888', background: '#f6efdd' }}>
               <div>Problem</div><div>Topic</div><div>Result</div><div>Time</div>
             </div>
-            {subs.slice(0, 15).map((s, i) => {
+            {subs.slice(0, 30).map((s, i) => {
               const prob = problems.find(x => String(x.id) === String(s.problem_id))
+              const isOpen = openRow === i
               return (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 140px 70px', gap: 12, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #ece2c9' }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{prob ? prob.title : 'Unknown Problem'}</div>
-                    {s.submitted_answer && (
-                      <div style={{ fontSize: 11.5, fontFamily: 'monospace', color: s.correct ? '#2e7d32' : '#c62828' }}>
-                        Submitted: {s.submitted_answer}
-                      </div>
-                    )}
+                <div key={i} style={{ borderBottom: '1px solid #ece2c9' }}>
+                  <div
+                    style={{ display: 'grid', gridTemplateColumns: '1fr 100px 140px 70px', gap: 12, alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
+                    onClick={() => setOpenRow(isOpen ? null : i)}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{prob ? prob.title : 'Unknown Problem'}</div>
+                      {s.submitted_answer && (
+                        <div style={{ fontSize: 11.5, fontFamily: 'monospace', color: s.correct ? '#2e7d32' : '#c62828' }}>
+                          Submitted: {s.submitted_answer}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: TOPIC_COLOUR[s.topic] || '#888' }}>{s.topic || (prob ? prob.topic : '-')}</div>
+                    <div>
+                      {s.correct ? (
+                        <span style={{ fontSize: 12, color: '#2e7d32', fontWeight: 600 }}>Correct</span>
+                      ) : (
+                        <div>
+                          <span style={{ fontSize: 12, color: '#c62828', fontWeight: 600 }}>Wrong</span>
+                          {prob && prob.answer && <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#888' }}>Answer: {prob.answer}</div>}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#888' }}>{formatTime(s.time_taken || 0)}</div>
                   </div>
-                  <div style={{ fontSize: 12, color: TOPIC_COLOUR[s.topic] || '#888' }}>{s.topic || (prob ? prob.topic : '-')}</div>
-                  <div>
-                    {s.correct ? (
-                      <span style={{ fontSize: 12, color: '#2e7d32', fontWeight: 600 }}>Correct</span>
-                    ) : (
-                      <div>
-                        <span style={{ fontSize: 12, color: '#c62828', fontWeight: 600 }}>Wrong</span>
-                        {prob && prob.answer && <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#888' }}>Answer: {prob.answer}</div>}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#888' }}>{formatTime(s.time_taken || 0)}</div>
+                  {isOpen && prob && (
+                    <div style={{ padding: '0 16px 14px 16px', fontSize: 13.5, color: '#444', lineHeight: 1.6 }}>
+                      <div style={{ fontSize: 10.5, textTransform: 'uppercase', color: '#a0651e', marginBottom: 4, fontWeight: 700 }}>Original Problem</div>
+                      {prob.body}
+                    </div>
+                  )}
                 </div>
               )
             })}

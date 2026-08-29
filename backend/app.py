@@ -8,6 +8,8 @@ import requests
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 
+# sympy handles the algebraic equivalence check for SC5
+# if it fails to import for some reason we just fall back to plain string matching
 try:
     from sympy import sympify, simplify
     sympy_loaded = True
@@ -24,6 +26,7 @@ AUTH_URL = f"{SUPABASE_URL}/auth/v1"
 
 TOPICS = ["Number Theory", "Algebra", "Combinatorics", "Geometry", "Probability", "Sequences"]
 
+# rough elo value for each difficulty, used as the "opponent rating" in the elo formula
 DIFF_RATINGS = {"Easy": 1100, "Medium": 1350, "Hard": 1650}
 
 app = Flask(__name__)
@@ -51,6 +54,8 @@ def db_update(table, data, match):
     res = requests.patch(f"{DB}/{table}", headers=get_headers({"Prefer": "return=representation"}), params=match, json=data, timeout=10)
     return res.json() if res.text else None
 
+# upsert is basically insert but overwrite if the row already exists
+# using this for stuff like topic_ratings where user_id + topic together are the key
 def db_upsert(table, data, conflict_col):
     res = requests.post(
         f"{DB}/{table}",
@@ -61,6 +66,8 @@ def db_upsert(table, data, conflict_col):
     )
     return res.json() if res.text else None
 
+# every route below this needs a valid supabase login token in the header
+# we just ask supabase itself if the token is real instead of trying to verify it ourselves
 def login_required(fn):
     @wraps(fn)
     def decorated(*args, **kwargs):
@@ -76,6 +83,9 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return decorated
 
+# this is the actual elo rating algorithm, same idea as chess ratings
+# expected is basically "how likely is this student to get it right given the two ratings"
+# then we move the rating up or down depending on if that guess was right
 def calc_elo(player_elo, difficulty, correct, time_taken):
     problem_rating = DIFF_RATINGS.get(difficulty, 1200)
     expected = 1 / (1 + 10 ** ((problem_rating - player_elo) / 400))
@@ -97,6 +107,8 @@ def norm_answer(answer):
         answer = answer.replace(ch, "")
     return answer
 
+# SC5, checks if two answers mean the same thing even if theyre written differently
+# eg 2(x+2) should count as the same answer as 2x+4
 def check_answer(user_answer, correct_answer):
     if norm_answer(user_answer) == norm_answer(correct_answer):
         return True
@@ -109,6 +121,8 @@ def check_answer(user_answer, correct_answer):
             if simplify(sympify(u) - sympify(c)) == 0:
                 return True
         except:
+            # sympy cant parse plain text like "banana", just fall back to
+            # the normal string check result from above
             pass
     return False
 
@@ -139,6 +153,8 @@ def get_problems():
         "user_id": f"eq.{g.user['id']}"
     })
     solved_ids = set(str(s["problem_id"]) for s in sub_rows if s.get("correct"))
+    # needs to be every problem theyve tried, not just the ones they got right,
+    # otherwise SC7 review cant show the correct answer for stuff they got wrong
     attempted_ids = set(str(s["problem_id"]) for s in sub_rows)
 
     result = []
@@ -151,6 +167,9 @@ def get_problems():
 
     return jsonify({"problems": result, "solved": list(solved_ids)})
 
+# SC10, picks a problem for the student to practice thats close to their level
+# in that topic. if no topic is passed in it grabs whichever topic theyre worst at,
+# this covers both "practice my weakest area" and practicing one named topic
 @app.get("/api/adaptive")
 @login_required
 def get_adaptive_problem():
@@ -173,6 +192,7 @@ def get_adaptive_problem():
 
     topic_problems = db_select("problems", {"select": "*", "topic": f"eq.{topic}"})
 
+    # SC3, only keep problems within 200 elo of the student
     in_range = []
     for p in topic_problems:
         if str(p["id"]) not in solved_ids:
@@ -202,6 +222,8 @@ def get_profile():
     if rows:
         return jsonify(rows[0])
 
+    # first login (mostly happens with google oauth) theres no profile row yet
+    # so make one on the spot
     meta = g.user.get("user_metadata") or {}
     username = meta.get("username") or meta.get("full_name") or g.user["email"].split("@")[0]
     created = db_upsert("profiles", {
@@ -240,6 +262,8 @@ def get_rank():
             return jsonify({"rank": i + 1, "total": len(all_profiles)})
     return jsonify({"rank": None, "total": len(all_profiles)})
 
+# SC6/SC7, no limit here since accuracy is supposed to reflect all of a
+# students questions, not just a recent slice
 @app.get("/api/me/submissions")
 @login_required
 def get_submissions():
@@ -247,10 +271,11 @@ def get_submissions():
         "select": "problem_id,correct,time_taken,submitted_at,submitted_answer,topic,topic_elo_after",
         "user_id": f"eq.{g.user['id']}",
         "order": "submitted_at.desc",
-        "limit": "100"
+        "limit": "1000"
     })
     return jsonify(subs)
 
+# this is the big one, handles a student submitting an answer to a problem
 @app.post("/api/submit")
 @login_required
 def submit_answer():
@@ -258,9 +283,9 @@ def submit_answer():
     problem_id = str(data.get("problem_id", ""))
     user_answer = (data.get("answer") or "").strip()
     time_taken = int(data.get("time_taken") or 0)
-    solution_viewed = bool(data.get("solution_viewed"))
     timed_out = bool(data.get("timed_out"))
 
+    # SC8, validate the input before doing anything else
     if timed_out:
         user_answer = "__TIMED_OUT__"
     elif not user_answer:
@@ -274,6 +299,8 @@ def submit_answer():
     problem = problems[0]
     topic = problem.get("topic", "Algebra")
 
+    # need to know if theyve already solved this one so we dont let them
+    # farm elo by resubmitting the same correct answer over and over
     existing = db_select("submissions", {
         "select": "id",
         "user_id": f"eq.{g.user['id']}",
@@ -287,22 +314,19 @@ def submit_answer():
     profiles = db_select("profiles", {"select": "*", "id": f"eq.{g.user['id']}"})
     profile = profiles[0] if profiles else {"elo": 1200, "solved_count": 0}
 
+    # SC3, topic_elo decides what problems get served next, global elo is
+    # just the number shown on the dashboard/sidebar
     topic_elo = get_topic_elo(g.user["id"], topic)
     topic_delta, new_topic_elo = calc_elo(topic_elo, problem.get("difficulty"), correct, time_taken)
     global_delta, new_global_elo = calc_elo(profile.get("elo", 1200), problem.get("difficulty"), correct, time_taken)
 
     if correct and not already_solved:
-        changes = {
+        db_update("profiles", {
+            "elo": new_global_elo,
             "solved_count": (profile.get("solved_count") or 0) + 1,
             "last_active": datetime.date.today().isoformat()
-        }
-        if not solution_viewed:
-            changes["elo"] = new_global_elo
-            save_topic_elo(g.user["id"], topic, new_topic_elo)
-        else:
-            new_topic_elo = topic_elo
-
-        db_update("profiles", changes, {"id": f"eq.{g.user['id']}"})
+        }, {"id": f"eq.{g.user['id']}"})
+        save_topic_elo(g.user["id"], topic, new_topic_elo)
         db_upsert("submissions", {
             "user_id": g.user["id"],
             "problem_id": problem_id,
@@ -318,6 +342,9 @@ def submit_answer():
         }, {"id": f"eq.{problem_id}"})
 
     elif not correct and not already_solved:
+        # wrong answer still costs elo, both topic and global need updating
+        # in the same step or they end up out of sync (this was a bug earlier,
+        # see the effectiveness of testing section for SC3)
         save_topic_elo(g.user["id"], topic, new_topic_elo)
         db_update("profiles", {"elo": new_global_elo}, {"id": f"eq.{g.user['id']}"})
         try:
@@ -335,14 +362,12 @@ def submit_answer():
         db_update("problems", {"attempts": (problem.get("attempts") or 0) + 1}, {"id": f"eq.{problem_id}"})
 
     if correct:
-        elo_change = 0 if (solution_viewed or already_solved) else topic_delta
+        elo_change = 0 if already_solved else topic_delta
         return jsonify({
             "correct": True,
             "already_solved": already_solved,
             "elo_delta": elo_change,
-            "elo_blocked": solution_viewed,
-            "new_elo": profile.get("elo", 1200) if (solution_viewed or already_solved) else new_global_elo,
-            "topic_elo": topic_elo if (solution_viewed or already_solved) else new_topic_elo,
+            "new_elo": profile.get("elo", 1200) if already_solved else new_global_elo,
             "explanation": problem.get("explanation"),
             "answer": problem.get("answer"),
             "time_taken": time_taken
@@ -352,96 +377,8 @@ def submit_answer():
     return jsonify({
         "correct": False,
         "elo_delta": elo_change,
-        "new_elo": profile.get("elo", 1200) if already_solved else new_global_elo,
-        "topic_elo": topic_elo if already_solved else new_topic_elo
+        "new_elo": profile.get("elo", 1200) if already_solved else new_global_elo
     })
-
-@app.post("/api/problems/<problem_id>/solution")
-@login_required
-def view_solution(problem_id):
-    rows = db_select("problems", {"select": "answer,explanation", "id": f"eq.{problem_id}"})
-    if not rows:
-        return jsonify({"error": "Problem not found"}), 404
-    return jsonify(rows[0])
-
-@app.get("/api/leaderboard")
-@login_required
-def get_leaderboard():
-    rows = db_select("profiles", {
-        "select": "id,username,elo,solved_count,streak",
-        "order": "elo.desc",
-        "limit": "20"
-    })
-    return jsonify(rows)
-
-@app.post("/api/problems")
-@login_required
-def create_problem():
-    data = request.json or {}
-    required_fields = ["title", "body", "topic", "difficulty", "answer", "explanation"]
-    for field in required_fields:
-        if not (data.get(field) or "").strip():
-            return jsonify({"error": f"{field} is required"}), 400
-
-    payload = {
-        "title": data["title"].strip(),
-        "body": data["body"].strip(),
-        "topic": data["topic"],
-        "difficulty": data["difficulty"],
-        "answer": data["answer"].strip(),
-        "explanation": data["explanation"].strip(),
-        "hint": (data.get("hint") or "").strip() or None,
-        "points": int(data.get("points") or 100),
-        "section": data.get("section") or "General",
-        "question_type": data.get("question_type") or "open",
-        "options": data.get("options"),
-        "attempts": 0,
-        "correct_count": 0,
-        "created_by": g.user["id"]
-    }
-
-    res = requests.post(
-        f"{DB}/problems",
-        headers=get_headers({"Prefer": "return=representation"}),
-        json=payload,
-        timeout=10
-    )
-    if res.status_code == 403:
-        return jsonify({"error": "You don't have upload permission"}), 403
-
-    result = res.json()
-    return jsonify(result[0] if result else payload), 201
-
-@app.get("/api/settings/open_uploads")
-@login_required
-def get_open_uploads():
-    rows = db_select("settings", {"select": "value", "key": "eq.open_uploads"})
-    is_open = bool(rows) and rows[0]["value"] == "true"
-    return jsonify({"open_uploads": is_open})
-
-@app.post("/api/admin/open_uploads")
-@login_required
-def set_open_uploads():
-    value = bool((request.json or {}).get("value"))
-    db_upsert("settings", {"key": "open_uploads", "value": str(value).lower()}, "key")
-    return jsonify({"ok": True, "open_uploads": value})
-
-@app.get("/api/admin/users")
-@login_required
-def get_all_users():
-    rows = db_select("profiles", {"select": "id,username,elo,can_upload,is_admin", "order": "elo.desc"})
-    return jsonify(rows)
-
-@app.post("/api/admin/users/<user_id>/permission")
-@login_required
-def update_permission(user_id):
-    data = request.json or {}
-    field = data.get("field")
-    value = bool(data.get("value"))
-    if field not in ("can_upload", "is_admin"):
-        return jsonify({"error": "Invalid field"}), 400
-    db_update("profiles", {field: value}, {"id": f"eq.{user_id}"})
-    return jsonify({"ok": True})
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

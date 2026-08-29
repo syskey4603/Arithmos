@@ -21,12 +21,16 @@ export default function Dashboard() {
     api.rank().then(r => setRank(r.rank)).catch(() => {})
   }, [profile ? profile.elo : null])
 
+  // just picks the same problem all day based on the date, so its actually
+  // "daily" instead of changing every refresh
   let daily = null
   if (problems.length > 0) {
     const dayIndex = Math.floor(Date.now() / 86400000)
     daily = problems[dayIndex % problems.length]
   }
 
+  // SC10, two lowest topic ratings show up here with a button to
+  // immediately start an adaptively selected practice problem from either
   let focus = []
   if (Object.keys(topicElos).length > 0) {
     focus = ALL_TOPICS.map(t => ({ topic: t, elo: topicElos[t] || 1200 }))

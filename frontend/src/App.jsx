@@ -6,13 +6,11 @@ import Dashboard from './pages/Dashboard'
 import Problems from './pages/Problems'
 import Solve from './pages/Solve'
 import Profile from './pages/Profile'
-import Leaderboard from './pages/Leaderboard'
-import Upload from './pages/Upload'
-import Admin from './pages/Admin'
 
 function Shell() {
   const { session, loadingData } = useApp()
 
+  // undefined means supabase hasnt responded yet, null means logged out
   if (session === undefined) {
     return <div className="loading-row" style={{ minHeight: '100vh' }}>Loading Arithmos...</div>
   }
@@ -31,9 +29,6 @@ function Shell() {
             <Route path="/problems" element={<Problems />} />
             <Route path="/solve/:id" element={<Solve />} />
             <Route path="/profile" element={<Profile />} />
-            <Route path="/leaderboard" element={<Leaderboard />} />
-            <Route path="/upload" element={<Upload />} />
-            <Route path="/admin" element={<Admin />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         )}

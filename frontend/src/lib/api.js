@@ -1,5 +1,7 @@
 import { supabase } from './supabase'
 
+// in dev this is empty so vite proxies /api to the flask server on 5001
+// in prod VITE_API_URL points straight at the render backend
 const API_BASE = (import.meta.env.VITE_API_URL || '') + '/api'
 
 async function getToken() {
@@ -8,6 +10,7 @@ async function getToken() {
   return data.session.access_token
 }
 
+// every request needs to carry the supabase token so the backend can check who we are
 async function call(method, path, body) {
   const token = await getToken()
   const res = await fetch(API_BASE + path, {
@@ -32,16 +35,9 @@ export const api = {
   rank: () => call('GET', '/rank'),
   topicElos: () => call('GET', '/profile/topic-elos'),
   problems: () => call('GET', '/problems'),
-  createProblem: (body) => call('POST', '/problems', body),
-  viewSolution: (id) => call('POST', '/problems/' + id + '/solution'),
   adaptive: (topic) => call('GET', '/adaptive' + (topic ? '?topic=' + encodeURIComponent(topic) : '')),
   mySubmissions: () => call('GET', '/me/submissions'),
-  submit: (body) => call('POST', '/submit', body),
-  leaderboard: () => call('GET', '/leaderboard'),
-  openUploads: () => call('GET', '/settings/open_uploads'),
-  adminUsers: () => call('GET', '/admin/users'),
-  setOpenUploads: (value) => call('POST', '/admin/open_uploads', { value }),
-  setPermission: (uid, field, value) => call('POST', '/admin/users/' + uid + '/permission', { field, value })
+  submit: (body) => call('POST', '/submit', body)
 }
 
 export function solveRate(p) {

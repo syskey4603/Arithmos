@@ -4,12 +4,11 @@ import { useApp } from '../state/AppContext'
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/problems', label: 'Problems' },
-  { to: '/leaderboard', label: 'Leaderboard' },
   { to: '/profile', label: 'Profile' }
 ]
 
 export function Sidebar() {
-  const { profile, canUpload, logout } = useApp()
+  const { profile, logout } = useApp()
 
   return (
     <aside className="sidebar">
@@ -22,16 +21,6 @@ export function Sidebar() {
           {n.label}
         </NavLink>
       ))}
-      {canUpload && (
-        <NavLink to="/upload" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-          Upload Problem
-        </NavLink>
-      )}
-      {profile && profile.is_admin && (
-        <NavLink to="/admin" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-          Admin
-        </NavLink>
-      )}
 
       <div className="user-box">
         <div className="uname">{profile ? profile.username : 'User'}</div>
@@ -45,10 +34,7 @@ export function Sidebar() {
 export function MobileNav() {
   const navigate = useNavigate()
   const loc = useLocation()
-  const { canUpload, profile } = useApp()
-  const items = [['/', 'Home'], ['/problems', 'Problems'], ['/leaderboard', 'Rank'], ['/profile', 'You']]
-  if (canUpload) items.push(['/upload', 'Upload'])
-  if (profile && profile.is_admin) items.push(['/admin', 'Admin'])
+  const items = [['/', 'Home'], ['/problems', 'Problems'], ['/profile', 'You']]
 
   return (
     <nav className="mobile-nav">

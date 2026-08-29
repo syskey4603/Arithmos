@@ -9,6 +9,7 @@ export default function AuthPage() {
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
 
+  // SC1, descriptive error for missing fields before even hitting supabase
   async function handleLogin(e) {
     e.preventDefault()
     if (!email.trim() || !password) {

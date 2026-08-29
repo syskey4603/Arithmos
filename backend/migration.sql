@@ -8,9 +8,14 @@ create table if not exists topic_ratings (
 
 alter table topic_ratings enable row level security;
 
-create policy "select own" on topic_ratings for select using (auth.uid() = user_id);
-create policy "insert own" on topic_ratings for insert with check (auth.uid() = user_id);
-create policy "update own" on topic_ratings for update using (auth.uid() = user_id);
+create policy "topic_ratings_select" on topic_ratings
+  for select using (auth.uid() = user_id);
+
+create policy "topic_ratings_insert" on topic_ratings
+  for insert with check (auth.uid() = user_id);
+
+create policy "topic_ratings_update" on topic_ratings
+  for update using (auth.uid() = user_id);
 
 alter table submissions add column if not exists submitted_answer text;
 alter table submissions add column if not exists topic text;

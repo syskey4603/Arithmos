@@ -4,20 +4,18 @@ import { useApp } from '../state/AppContext'
 import { solveRate } from '../lib/api'
 import { DiffBadge, TopicTag } from '../components/ui'
 
-const SECTIONS = ['all', 'General', 'Competition Math', 'IB AA HL']
 const TOPICS = ['all', 'Number Theory', 'Algebra', 'Combinatorics', 'Geometry', 'Probability', 'Sequences']
 const DIFFS = ['all', 'Easy', 'Medium', 'Hard']
 
 export default function Problems() {
   const { problems, solvedSet } = useApp()
   const navigate = useNavigate()
-  const [section, setSection] = useState('all')
   const [topic, setTopic] = useState('all')
   const [diff, setDiff] = useState('all')
   const [search, setSearch] = useState('')
 
+  // SC2, filter the problem bank by topic and difficulty
   const filtered = problems.filter(p => {
-    if (section !== 'all' && (p.section || 'General') !== section) return false
     if (topic !== 'all' && p.topic !== topic) return false
     if (diff !== 'all' && p.difficulty !== diff) return false
     if (search) {
@@ -30,17 +28,9 @@ export default function Problems() {
   return (
     <div>
       <h1 className="page-title">Problem Bank</h1>
-      <p className="page-sub">{problems.length} problems - AMC, UKMT, Fermat and IB AA HL past papers</p>
+      <p className="page-sub">{problems.length} problems - AMC, UKMT, Fermat past papers</p>
 
       <div className="filter-bar" style={{ marginTop: 22 }}>
-        {SECTIONS.map(s => (
-          <button key={s} className={'chip' + (section === s ? ' active' : '')} onClick={() => setSection(s)}>
-            {s === 'all' ? 'All Sections' : s}
-          </button>
-        ))}
-      </div>
-
-      <div className="filter-bar" style={{ marginTop: 10 }}>
         {TOPICS.map(t => (
           <button key={t} className={'chip' + (topic === t ? ' active' : '')} onClick={() => setTopic(t)}>
             {t === 'all' ? 'All Topics' : t}
@@ -73,10 +63,7 @@ export default function Problems() {
               <div className="row-sub">{p.attempts || 0} attempts</div>
             </div>
             <div><TopicTag t={p.topic} /></div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <DiffBadge d={p.difficulty} />
-              {p.question_type === 'mcq' && <span className="tag tag-mcq">MCQ</span>}
-            </div>
+            <div><DiffBadge d={p.difficulty} /></div>
             <div className="rate-wrap">
               <div className="rate-bar"><div className="rate-fill" style={{ width: solveRate(p) + '%' }}></div></div>
               <span className="rate-text">{solveRate(p)}%</span>
