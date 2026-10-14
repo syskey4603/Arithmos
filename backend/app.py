@@ -11,10 +11,30 @@ from flask_cors import CORS
 # sympy handles the algebraic equivalence check for SC5
 # if it fails to import for some reason we just fall back to plain string matching
 try:
-    from sympy import sympify, simplify
+    import sympy
+    from sympy import simplify
+    from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application, convert_xor
     sympy_loaded = True
 except:
     sympy_loaded = False
+
+if sympy_loaded:
+    # implicit multiplication lets sympy read 2x and 2(x+2), convert_xor makes ^ mean power
+    MATH_RULES = standard_transformations + (implicit_multiplication_application, convert_xor)
+    # sympy reads answers using python eval, so it only gets these names and no python
+    # builtins, otherwise typing something like exec(...) into the answer box would run as code
+    SAFE_NAMES = {"__builtins__": {}}
+    for name in ["Symbol", "Integer", "Float", "Rational", "Function", "Lambda", "factorial", "sqrt", "pi"]:
+        SAFE_NAMES[name] = getattr(sympy, name)
+
+# only answers made of normal maths characters ever get sent to sympy
+MATHS_CHARS = re.compile(r"^[0-9a-z+\-*/^().√π\s]{1,60}$", re.IGNORECASE)
+
+def read_maths(text):
+    text = re.sub(r"√\(", "sqrt(", text)
+    text = re.sub(r"√(\w+)", r"sqrt(\1)", text)
+    text = text.replace("π", "pi")
+    return parse_expr(text, local_dict={}, global_dict=dict(SAFE_NAMES), transformations=MATH_RULES)
 
 SUPABASE_URL = "https://wyddqwmoltzmasxerbpn.supabase.co"
 SUPABASE_KEY = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
@@ -112,13 +132,9 @@ def norm_answer(answer):
 def check_answer(user_answer, correct_answer):
     if norm_answer(user_answer) == norm_answer(correct_answer):
         return True
-    if sympy_loaded:
+    if sympy_loaded and MATHS_CHARS.match(user_answer) and MATHS_CHARS.match(correct_answer):
         try:
-            u = user_answer.replace("^", "**")
-            c = correct_answer.replace("^", "**")
-            u = re.sub(r"√(\w+)", r"sqrt(\1)", u)
-            c = re.sub(r"√(\w+)", r"sqrt(\1)", c)
-            if simplify(sympify(u) - sympify(c)) == 0:
+            if simplify(read_maths(user_answer) - read_maths(correct_answer)) == 0:
                 return True
         except:
             # sympy cant parse plain text like "banana", just fall back to
@@ -192,6 +208,11 @@ def get_adaptive_problem():
 
     topic_problems = db_select("problems", {"select": "*", "topic": f"eq.{topic}"})
 
+    # the next problem button sends the current problem id so it doesnt get served again
+    exclude = request.args.get("exclude", "")
+    if exclude and len(topic_problems) > 1:
+        topic_problems = [p for p in topic_problems if str(p["id"]) != exclude]
+
     # SC3, only keep problems within 200 elo of the student
     in_range = []
     for p in topic_problems:
@@ -200,8 +221,13 @@ def get_adaptive_problem():
             if abs(p_rating - topic_elo) <= 200:
                 in_range.append(p)
 
+    # if nothing is within 200, pick the unsolved problems whose rating is
+    # closest to the student instead of any random one, so its still the best match
     if not in_range:
-        in_range = [p for p in topic_problems if str(p["id"]) not in solved_ids]
+        unsolved = [p for p in topic_problems if str(p["id"]) not in solved_ids]
+        if unsolved:
+            gaps = [abs(DIFF_RATINGS.get(p.get("difficulty", "Medium"), 1200) - topic_elo) for p in unsolved]
+            in_range = [p for p, gap in zip(unsolved, gaps) if gap == min(gaps)]
     if not in_range:
         in_range = topic_problems
     if not in_range:
@@ -299,6 +325,10 @@ def submit_answer():
     problem = problems[0]
     topic = problem.get("topic", "Algebra")
 
+    # SC8, multiple choice questions only accept one of the option letters
+    if not timed_out and problem.get("question_type") == "mcq" and user_answer.upper() not in ["A", "B", "C", "D", "E"]:
+        return jsonify({"error": "Answer must be one of the option letters A to E."}), 400
+
     # need to know if theyve already solved this one so we dont let them
     # farm elo by resubmitting the same correct answer over and over
     existing = db_select("submissions", {
@@ -327,7 +357,8 @@ def submit_answer():
             "last_active": datetime.date.today().isoformat()
         }, {"id": f"eq.{g.user['id']}"})
         save_topic_elo(g.user["id"], topic, new_topic_elo)
-        db_upsert("submissions", {
+        # insert not upsert, so earlier wrong attempts on this problem are kept for SC7
+        db_insert("submissions", {
             "user_id": g.user["id"],
             "problem_id": problem_id,
             "correct": True,
@@ -335,7 +366,7 @@ def submit_answer():
             "submitted_answer": user_answer if not timed_out else None,
             "topic": topic,
             "topic_elo_after": new_topic_elo
-        }, "user_id,problem_id")
+        })
         db_update("problems", {
             "attempts": (problem.get("attempts") or 0) + 1,
             "correct_count": (problem.get("correct_count") or 0) + 1
@@ -347,18 +378,15 @@ def submit_answer():
         # see the effectiveness of testing section for SC3)
         save_topic_elo(g.user["id"], topic, new_topic_elo)
         db_update("profiles", {"elo": new_global_elo}, {"id": f"eq.{g.user['id']}"})
-        try:
-            db_insert("submissions", {
-                "user_id": g.user["id"],
-                "problem_id": problem_id,
-                "correct": False,
-                "time_taken": time_taken,
-                "submitted_answer": user_answer if not timed_out else None,
-                "topic": topic,
-                "topic_elo_after": new_topic_elo
-            })
-        except:
-            pass
+        db_insert("submissions", {
+            "user_id": g.user["id"],
+            "problem_id": problem_id,
+            "correct": False,
+            "time_taken": time_taken,
+            "submitted_answer": user_answer if not timed_out else None,
+            "topic": topic,
+            "topic_elo_after": new_topic_elo
+        })
         db_update("problems", {"attempts": (problem.get("attempts") or 0) + 1}, {"id": f"eq.{problem_id}"})
 
     if correct:
