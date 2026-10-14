@@ -43,7 +43,7 @@ export default function Solve() {
       })
     }, 1000)
     return () => clearInterval(timerRef.current)
-  }, [running])
+  }, [running, id])
 
   useEffect(() => {
     if (seconds === 0 && running && !timedOut && !alreadySolved) {
@@ -56,7 +56,7 @@ export default function Solve() {
   // resets everything when they navigate to a different problem
   useEffect(() => {
     const solved = solvedSet.has(String(id))
-    clearInterval(timerRef.current)
+    // (the timer effect above restarts itself when id changes, so no clearInterval here)
     setSeconds(solved ? 0 : TIME_LIMIT)
     setRunning(!solved)
     setAnswer(solved && problem ? problem.answer : '')
