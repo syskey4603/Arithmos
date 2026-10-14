@@ -96,6 +96,19 @@ export default function Solve() {
     }
   }
 
+  // SC3, the next problem is picked by /api/adaptive so its within 200 ELO
+  // of the students rating for this topic
+  async function nextProblem() {
+    setBusy(true)
+    try {
+      const next = await api.adaptive(problem.topic, String(problem.id))
+      navigate('/solve/' + next.id)
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+    setBusy(false)
+  }
+
   async function submit(givenAnswer) {
     const userAnswer = (givenAnswer !== undefined ? givenAnswer : answer).trim()
 
@@ -257,8 +270,11 @@ export default function Solve() {
         </div>
       )}
 
-      <div style={{ display: 'flex', marginTop: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <button className="btn btn-plain" style={{ marginLeft: 'auto' }} onClick={() => navigate('/problems')}>Back to Problems</button>
+        {locked && (
+          <button className="btn btn-primary" disabled={busy} onClick={nextProblem}>Next problem</button>
+        )}
       </div>
     </div>
   )
