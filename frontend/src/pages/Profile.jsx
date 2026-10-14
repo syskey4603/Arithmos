@@ -18,6 +18,7 @@ export default function Profile() {
   const [rank, setRank] = useState(null)
   const [subs, setSubs] = useState(null)
   const [openRow, setOpenRow] = useState(null) // which submission row is expanded, SC7
+  const [shown, setShown] = useState(30) // how many history rows are showing, more load on click
 
   useEffect(() => { setUsername(profile ? profile.username : '') }, [profile ? profile.username : null])
 
@@ -54,14 +55,15 @@ export default function Profile() {
     const byTopic = {}
     for (const s of [...subs].reverse()) {
       if (!s.topic || s.topic_elo_after == null) continue
-      if (!byTopic[s.topic]) byTopic[s.topic] = []
+      // every topic starts at 1200 so the line begins from account creation
+      if (!byTopic[s.topic]) byTopic[s.topic] = [1200]
       byTopic[s.topic].push(s.topic_elo_after)
     }
     topicList = Object.keys(byTopic).filter(t => byTopic[t].length > 0)
     if (topicList.length > 0) {
       const maxLen = Math.max(...topicList.map(t => byTopic[t].length))
       for (let i = 0; i < maxLen; i++) {
-        const point = { n: i + 1 }
+        const point = { n: i }
         for (const t of topicList) {
           if (byTopic[t][i] != null) point[t] = byTopic[t][i]
         }
@@ -133,7 +135,7 @@ export default function Profile() {
               <CartesianGrid stroke="#e6dcc0" vertical={false} />
               <XAxis dataKey="n" tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-              <Tooltip contentStyle={{ background: '#fff', border: '1px solid #ccc', fontSize: 12 }} labelFormatter={n => 'Attempt ' + n} />
+              <Tooltip contentStyle={{ background: '#fff', border: '1px solid #ccc', fontSize: 12 }} labelFormatter={n => n === 0 ? 'Start' : 'Attempt ' + n} />
               <Legend wrapperStyle={{ fontSize: 12 }} formatter={v => <span style={{ color: TOPIC_COLOUR[v] || '#888' }}>{v}</span>} />
               {topicList.map(topic => (
                 <Line key={topic} type="monotone" dataKey={topic} stroke={TOPIC_COLOUR[topic] || '#888'} strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
@@ -177,7 +179,7 @@ export default function Profile() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 140px 70px', gap: 12, padding: '10px 16px', borderBottom: '1px solid #ddd0ac', fontSize: 11, textTransform: 'uppercase', color: '#888', background: '#f6efdd' }}>
               <div>Problem</div><div>Topic</div><div>Result</div><div>Time</div>
             </div>
-            {subs.slice(0, 30).map((s, i) => {
+            {subs.slice(0, shown).map((s, i) => {
               const prob = problems.find(x => String(x.id) === String(s.problem_id))
               const isOpen = openRow === i
               return (
@@ -188,11 +190,9 @@ export default function Profile() {
                   >
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{prob ? prob.title : 'Unknown Problem'}</div>
-                      {s.submitted_answer && (
-                        <div style={{ fontSize: 11.5, fontFamily: 'monospace', color: s.correct ? '#2e7d32' : '#c62828' }}>
-                          Submitted: {s.submitted_answer}
-                        </div>
-                      )}
+                      <div style={{ fontSize: 11.5, fontFamily: 'monospace', color: s.correct ? '#2e7d32' : '#c62828' }}>
+                        Submitted: {s.submitted_answer ? s.submitted_answer : '(timed out)'}
+                      </div>
                     </div>
                     <div style={{ fontSize: 12, color: TOPIC_COLOUR[s.topic] || '#888' }}>{s.topic || (prob ? prob.topic : '-')}</div>
                     <div>
@@ -216,6 +216,12 @@ export default function Profile() {
                 </div>
               )
             })}
+            {/* SC7 says any past attempt, so older ones can still be loaded */}
+            {subs.length > shown && (
+              <div style={{ padding: 12, textAlign: 'center' }}>
+                <button className="btn btn-plain" onClick={() => setShown(shown + 30)}>Show older attempts</button>
+              </div>
+            )}
           </>
         )}
       </div>
