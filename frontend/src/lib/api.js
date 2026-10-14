@@ -35,7 +35,12 @@ export const api = {
   rank: () => call('GET', '/rank'),
   topicElos: () => call('GET', '/profile/topic-elos'),
   problems: () => call('GET', '/problems'),
-  adaptive: (topic) => call('GET', '/adaptive' + (topic ? '?topic=' + encodeURIComponent(topic) : '')),
+  adaptive: (topic, exclude) => {
+    const params = []
+    if (topic) params.push('topic=' + encodeURIComponent(topic))
+    if (exclude) params.push('exclude=' + encodeURIComponent(exclude))
+    return call('GET', '/adaptive' + (params.length ? '?' + params.join('&') : ''))
+  },
   mySubmissions: () => call('GET', '/me/submissions'),
   submit: (body) => call('POST', '/submit', body)
 }
